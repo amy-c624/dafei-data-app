@@ -22,7 +22,7 @@ def check_password():
 st.set_page_config(page_title="大飛數據對帳系統", layout="wide")
 
 if check_password():
-    # 1. 假期定義
+    # 1. 假期定義 (2025-2026)
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
@@ -41,32 +41,54 @@ if check_password():
             qty, rev = row['交易數量'] if pd.notna(row['交易數量']) else 0, row['原幣含稅金額'] if pd.notna(row['原幣含稅金額']) else 0
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "商品收入", "無視", 0, 0, 0
 
+            # --- 身分辨識與人次邏輯 (不論有無節目名稱，只要符合特徵就先標記) ---
+            # 優先權 1: 股東
+            if any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
+            # 優先權 2: 校園票 (VIP核銷 + Z00054)
+            elif 'VIP貴賓券核銷' in spec and cid == 'Z00054': res_att_cat = "校園優惠票"
+            # 優先權 3: VIP (一般)
+            elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
+            # 優先權 4: 親子卡 (成人票 + P開頭)
+            elif '成人票' in spec and cid.startswith('P'): res_att_cat = "親子卡"
+            # 優先權 5: VVIP
+            elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
+            # 優先權 6: 團購券
+            elif any(x in spec for x in ['團購兌換券展延', '團購兌換券核銷']): res_att_cat = "團購券"
+            # 優先權 7: 平台
+            elif '平台通路票' in spec: res_att_cat = "平台"
+            # 優先權 8: 團體
+            elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
+            # 優先權 9: 散客 (其餘票種)
+            elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
+            # 優先權 10: 無視 (免費/員工/差額)
+            if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): res_att_cat = "無視"
+
+            # --- 營收與數量計算邏輯 ---
             if pname != "":
                 res_rev = "票務收入"
-                res_watch_val = qty # 純交易數量
+                res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
                 res_att_val = n_films * qty
-                
-                if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): res_att_cat = "無視"
-                elif 'VIP貴賓券核銷' in spec: res_att_cat = "校園優惠票" if cid == 'Z00054' else "VIP"
-                elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']):
-                    res_att_cat = "親子卡" if ('成人票' in spec and cid.startswith('P')) else "散客"
-                elif '平台通路票' in spec: res_att_cat = "平台"
-                elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
-                elif '股東券' in spec: res_att_cat = "股東"
-                elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
-                elif any(x in spec for x in ['團購兌換券展延', '團購兌換券核銷']): res_att_cat = "團購券"
             else:
+                # 無節目名稱的情況
                 esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
-                if any(k in spec for k in esports_k): res_rev, res_att_cat, res_esports_val = "電競館收入", "電競館", qty
+                if any(k in spec for k in esports_k):
+                    res_rev, res_att_cat, res_esports_val = "電競館收入", "電競館", qty
                 elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台收入"
                 elif any(x in spec for x in ['VIP貴賓券', '商品兌換券', '票券核銷']): res_rev = "無視"
                 elif '團購兌換券' in spec: res_rev = "預售票收入"
-                elif '票' in spec: res_rev = "票務收入"
+                elif '票' in spec: res_rev = "票務收入" # 第七層
                 else:
                     if '巨人' in spec: res_rev = "巨人周邊商品"
                     elif '妖怪' in spec: res_rev = "妖怪周邊商品"
                     else: res_rev = "周邊商品"
+                
+                # 如果沒有節目名稱，除了電競館外，其餘人次皆強制歸為無視
+                if res_att_cat != "電競館":
+                    res_att_val = 0
+                    res_watch_val = 0
+                    if res_rev != "票務收入": res_att_cat = "無視"
+
             return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev, pname])
 
         df[['營收分類', '人次分類', '計算人次', '電競人次', '觀看總數', '含稅營收', '清單節目名稱']] = df.apply(classify, axis=1)
@@ -87,7 +109,7 @@ if check_password():
         
         f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))].copy()
 
-        # --- 頂部看板 ---
+        # --- 數據看板 ---
         st.header(f"📈 數據統計看板")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("總計營收 (不含無視)", f"{f_df['統計用營收'].sum():,.0f}")
@@ -95,7 +117,7 @@ if check_password():
         c3.metric("影片觀看總數", f"{f_df['觀看總數'].sum():,.0f}")
         c4.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
 
-        # --- 第一層：合計表 ---
+        # --- 報表表格 ---
         t1, t2 = st.columns(2)
         with t1:
             st.subheader("💰 營收分類合計")
@@ -110,20 +132,14 @@ if check_password():
             att_final = pd.concat([att_table, pd.DataFrame([{'人次分類': '--- 合計 ---', '計算人次': f_df['計算人次'].sum(), '觀看總數': f_df['觀看總數'].sum(), '電競人次': f_df['電競人次'].sum()}])])
             st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}))
 
-        # --- 第二層：影片觀看清單 ---
+        # --- 影片清單 ---
         st.divider()
-        st.subheader("🎬 影片觀看人數統計 (按節目名稱)")
-        # 僅統計有節目名稱的資料
+        st.subheader("🎬 影片觀看人數統計")
         watch_df = f_df[f_df['清單節目名稱'] != ""].groupby('清單節目名稱')['觀看總數'].sum().reset_index()
-        watch_df = watch_df.rename(columns={'清單節目名稱': '節目名稱', '觀看總數': '觀看人數(交易數量)'})
-        watch_df = watch_df.sort_values(by='觀看人數(交易數量)', ascending=False)
-        
-        # 加入合計行
-        watch_total = watch_df['觀看人數(交易數量)'].sum()
-        watch_final = pd.concat([watch_df, pd.DataFrame([{'節目名稱': '--- 總觀看合計 ---', '觀看人數(交易數量)': watch_total}])])
-        st.table(watch_final.style.format({'觀看人數(交易數量)': '{:,.0f}'}))
+        watch_df = watch_df.rename(columns={'清單節目名稱': '節目名稱', '觀看總數': '觀看人數'})
+        watch_final = pd.concat([watch_df.sort_values(by='觀看人數', ascending=False), pd.DataFrame([{'節目名稱': '--- 總觀看合計 ---', '觀看人數': f_df['觀看總數'].sum()}])])
+        st.table(watch_final.style.format({'觀看人數': '{:,.0f}'}))
 
         st.divider()
         st.subheader("數據明細")
         st.dataframe(f_df)
-        st.download_button("📥 下載篩選報表", f_df.to_csv(index=False).encode('utf-8-sig'), "篩選報表.csv")
