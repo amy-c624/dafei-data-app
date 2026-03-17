@@ -5,7 +5,7 @@ import numpy as np
 # --- 0. 密碼驗證 ---
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "Brogent":
+        if st.session_state["password"] == "TEST": # 可在此修改密碼
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
@@ -22,14 +22,14 @@ def check_password():
 st.set_page_config(page_title="大飛數據對帳系統", layout="wide")
 
 if check_password():
-    # 1. 假期定義
+    # 1. 假期定義 (2025-2026 台灣國定假日)
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
         holidays = ['2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-02', '2025-02-28', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-31', '2025-06-01', '2025-06-02', '2025-10-04', '2025-10-05', '2025-10-06', '2025-10-10', '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-28', '2026-03-01', '2026-03-02']
         return "假日" if (d_str in holidays or date.weekday() >= 5) else "平日"
 
-    # 2. 處理函數
+    # 2. 核心處理函數
     def process_data(df):
         df['交易日期'] = pd.to_datetime(df['交易日期'], errors='coerce')
         df = df.dropna(subset=['交易日期']).copy()
@@ -38,13 +38,16 @@ if check_password():
 
         def classify(row):
             pname, spec, cid = str(row['節目名稱']) if pd.notna(row['節目名稱']) else "", str(row['品名規格']), str(row['客戶編號'])
-            qty, rev = row['交易數量'], row['原幣含稅金額']
-            res_rev, res_att_cat, res_att_val, res_esports_val, needs_confirm = "商品收入", "無視", 0, 0, False
+            qty, rev = row['交易數量'] if pd.notna(row['交易數量']) else 0, row['原幣含稅金額'] if pd.notna(row['原幣含稅金額']) else 0
+            res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "商品收入", "無視", 0, 0, 0
 
+            # 判斷有無節目名稱
             if pname != "":
                 res_rev = "票務收入"
+                res_watch_val = qty # 節目觀看總數：純計算交易數量
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
                 res_att_val = n_films * qty
+                
                 if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): res_att_cat = "無視"
                 elif 'VIP貴賓券核銷' in spec: res_att_cat = "校園優惠票" if cid == 'Z00054' else "VIP"
                 elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']):
@@ -65,11 +68,11 @@ if check_password():
                     if '巨人' in spec: res_rev = "巨人周邊商品"
                     elif '妖怪' in spec: res_rev = "妖怪周邊商品"
                     else: res_rev = "周邊商品"
-            return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, rev])
+            return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev])
 
-        df[['營收分類', '人次分類', '計算人次', '電競人次', '含稅營收']] = df.apply(classify, axis=1)
-        # 計算用營收：無視項目不計入
-        df['計算用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
+        df[['營收分類', '人次分類', '計算人次', '電競人次', '觀看總數', '含稅營收']] = df.apply(classify, axis=1)
+        # 統計用營收：無視項目不計入合計
+        df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
     st.title("📊 大飛數據分析系統")
@@ -79,35 +82,41 @@ if check_password():
         df = pd.read_csv(uploaded_file, dtype={'客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'客戶編號': str})
         processed = process_data(df)
         
-        # 篩選器
+        # --- 側邊欄篩選器 ---
         st.sidebar.header("數據篩選")
-        sel_months = st.sidebar.multiselect("月份", sorted(processed['月份'].unique()), default=processed['月份'].unique())
-        sel_holiday = st.sidebar.multiselect("類型", ["平日", "假日"], default=["平日", "假日"])
-        f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))]
+        all_months = sorted(processed['月份'].unique())
+        sel_months = st.sidebar.multiselect("選擇月份", all_months, default=all_months)
+        sel_holiday = st.sidebar.multiselect("日期類型", ["平日", "假日"], default=["平日", "假日"])
+        
+        # 套用篩選至全局
+        f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))].copy()
 
-        # 看板 (合計不含無視項目)
-        st.header(f"📈 合計 (不含無視項目)")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("總計營收", f"{f_df['計算用營收'].sum():,.0f}")
-        c2.metric("i-Ride 人次", f"{f_df['計算人次'].sum():,.0f}")
-        c3.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
+        # --- 頂部看板 (隨篩選更新) ---
+        st.header(f"📈 數據統計看板 (已篩選)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("總計營收 (不含無視)", f"{f_df['統計用營收'].sum():,.0f}")
+        c2.metric("i-Ride 人次 (倍率計算)", f"{f_df['計算人次'].sum():,.0f}")
+        c3.metric("節目觀看總數 (純交易數)", f"{f_df['觀看總數'].sum():,.0f}")
+        c4.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
 
+        # --- 分類統計表 ---
         t1, t2 = st.columns(2)
         with t1:
-            st.subheader("💰 營收分類合計 (無視項目不計入總額)")
+            st.subheader("💰 營收分類合計")
             rev_table = f_df.groupby('營收分類')['含稅營收'].sum().reset_index()
-            total_rev = f_df['計算用營收'].sum()
-            new_row = pd.DataFrame([{'營收分類': '--- 合計 ---', '含稅營收': total_rev}])
-            st.table(pd.concat([rev_table, new_row]).style.format({'含稅營收': '{:,.0f}'}))
+            total_rev = f_df['統計用營收'].sum()
+            rev_final = pd.concat([rev_table, pd.DataFrame([{'營收分類': '--- 合計(不含無視) ---', '含稅營收': total_rev}])])
+            st.table(rev_final.style.format({'含稅營收': '{:,.0f}'}))
         
         with t2:
             st.subheader("👥 人次分類合計")
-            att_table = f_df.groupby('人次分類')[['計算人次', '電競人次']].sum().reset_index()
-            total_att = att_table['計算人次'].sum()
-            total_esp = att_table['電競人次'].sum()
-            new_att = pd.DataFrame([{'人次分類': '--- 合計 ---', '計算人次': total_att, '電競人次': total_esp}])
-            st.table(pd.concat([att_table, new_att]).style.format({'計算人次': '{:,.0f}', '電競人次': '{:,.0f}'}))
+            att_table = f_df.groupby('人次分類')[['計算人次', '觀看總數', '電競人次']].sum().reset_index()
+            total_att = f_df['計算人次'].sum()
+            total_watch = f_df['觀看總數'].sum()
+            total_esp = f_df['電競人次'].sum()
+            att_final = pd.concat([att_table, pd.DataFrame([{'人次分類': '--- 合計 ---', '計算人次': total_att, '觀看總數': total_watch, '電競人次': total_esp}])])
+            st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}))
 
-        st.subheader("數據明細")
+        st.subheader("數據明細 (篩選後)")
         st.dataframe(f_df)
-        st.download_button("📥 下載報表", f_df.to_csv(index=False).encode('utf-8-sig'), "對齊報表.csv")
+        st.download_button("📥 下載篩選後報表", f_df.to_csv(index=False).encode('utf-8-sig'), "篩選報表.csv")
