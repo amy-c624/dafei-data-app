@@ -47,7 +47,7 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # --- [A] 人次分類邏輯 (維持正確版不動) ---
+            # --- [人次分類] 完全回到正確邏輯版 ---
             if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
@@ -63,46 +63,37 @@ if check_password():
             if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票務核銷']): 
                 res_att_cat = "無視"
 
-            # 處理電競人次
-            esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
-            if any(k in spec for k in esports_k): 
-                res_att_cat = "電競館"
-                res_esports_val = qty
-
-            # --- [B] 計算人次與觀看數 ---
-            if res_att_cat != "無視" and res_att_cat != "電競館" and pname != "" and pname != "nan":
+            # 計算觀看與人次
+            if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
                 res_att_val = n_films * qty
+            else:
+                esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
+                if any(k in spec for k in esports_k): 
+                    res_att_cat = "電競館"
+                    res_esports_val = qty
+                if res_att_cat != "電競館":
+                    res_att_val, res_watch_val = 0, 0
 
-            # --- [C] 營收分類邏輯 (關鍵修正優先級) ---
-            # 1. 營收無視 (最優先)
+            # --- [營收分類] 回到穩定版並微調票務歸類 ---
+            # 1. 優先判定無視 (總營收正確的關鍵)
             if any(x in spec for x in ['商品兌換券', '票務核銷']):
                 res_rev = "無視"
-            
-            # 2. 平台收入 (優先於一般票務)
-            elif (res_att_cat == "平台") or any(x in spec for x in ['門票分潤', '線上票券']):
+            # 2. 判定特殊科目
+            elif any(x in spec for x in ['門票分潤', '線上票券']):
                 res_rev = "平台收入"
-            
-            # 3. 預售票收入 (優先於一般票務)
-            elif (res_att_cat == "團購券") or ('團購兌換券' in spec):
+            elif '團購兌換券' in spec:
                 res_rev = "預售票收入"
-            
-            # 4. 特定周邊
             elif '巨人' in spec:
                 res_rev = "巨人周邊商品"
             elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']:
                 res_rev = "妖怪周邊商品"
-            
-            # 5. 票務收入 (口袋邏輯：排除上述後，只要有票/券字眼，或有節目名，或屬於特定人次)
-            elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品"]):
+            # 3. 票務收入口袋邏輯 (包含人次為無視但含有票/券字眼的項目)
+            elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品", "電競館"]):
                 res_rev = "票務收入"
-            
-            # 6. 電競
             elif res_att_cat == "電競館":
                 res_rev = "電競館收入"
-            
-            # 7. 最後其餘皆為周邊
             else:
                 res_rev = "周邊商品"
 
