@@ -5,7 +5,7 @@ import numpy as np
 # --- 0. 密碼驗證 ---
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "dafei2026":
+        if st.session_state["password"] == "TEST":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
