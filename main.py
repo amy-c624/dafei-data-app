@@ -1,9 +1,43 @@
 import streamlit as st
 import pandas as pd
-import io
+import datetime
 
-# --- 1. 核心處理函數 ---
+# --- 1. 台灣國定假日定義 (2025-2026) ---
+def get_holiday_type(date):
+    # 轉為字串方便比對
+    d_str = date.strftime('%Y-%m-%d')
+    
+    # 2025-2026 台灣國定連假/紀念日清單 (範例，可持續補充)
+    holidays = [
+        '2025-01-01', # 元旦
+        '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-02', # 春節
+        '2025-02-28', # 228
+        '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', # 清明兒童
+        '2025-05-31', '2025-06-01', '2025-06-02', # 端午
+        '2025-10-04', '2025-10-05', '2025-10-06', # 中秋
+        '2025-10-10', # 國慶
+        '2026-01-01', # 元旦
+        '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', # 2026春節
+        '2026-02-28', '2026-03-01', '2026-03-02', # 2026 228
+    ]
+    
+    # 判斷邏輯：國定假日 OR 週六(5) OR 週日(6)
+    if d_str in holidays or date.weekday() >= 5:
+        return "假日"
+    return "平日"
+
+# --- 2. 核心處理函數 ---
 def process_data(df):
+    # 自動補齊日期相關欄位
+    if '交易日期' in df.columns:
+        df['交易日期'] = pd.to_datetime(df['交易日期'])
+        df['月份'] = df['交易日期'].dt.strftime('%Y/%m月')
+        df['星期'] = df['交易日期'].dt.day_name().replace({
+            'Monday':'星期一','Tuesday':'星期二','Wednesday':'星期三',
+            'Thursday':'星期四','Friday':'星期五','Saturday':'星期六','Sunday':'星期日'
+        })
+        df['假期'] = df['交易日期'].apply(get_holiday_type)
+
     def get_num_films(pname):
         if pd.isna(pname) or str(pname).strip() == '': return 0
         return 2 if ('+' in str(pname) or '＋' in str(pname)) else 1
@@ -16,10 +50,8 @@ def process_data(df):
         rev = row['原幣含稅金額'] if pd.notna(row['原幣含稅金額']) else 0
 
         res_rev, res_att_cat, res_att_val, res_esports_val = "商品收入", "無視", 0, 0
-        reason = ""
-        needs_confirm = False
+        reason, needs_confirm = "", False
 
-        # 邏輯判斷開始
         if pname != "":
             res_rev = "票務"
             n_films = get_num_films(pname)
@@ -45,67 +77,27 @@ def process_data(df):
                 res_rev, res_att_cat, res_esports_val = "電競館", "電競館", qty
                 reason = "品名符合電競館關鍵字"
             elif any(x in spec for x in ['門票分潤', '線上票券']):
-                res_rev, reason = "平台收入", "品名符合平台分潤關鍵字"
+                res_rev, reason = "平台收入", "符合平台分潤關鍵字"
             elif any(x in spec for x in ['VIP貴賓券', '商品兌換券', '票券核銷']):
-                res_rev, rev, reason = "無視", 0, "品名為無視項目(不計營收)"
+                res_rev, rev, reason = "無視", 0, "無視項目(不計營收)"
             elif '團購兌換券' in spec:
-                res_rev, reason = "預售票", "品名符合預售票關鍵字"
+                res_rev, reason = "預售票", "符合預售票關鍵字"
             else:
-                reason = "無節目名稱且非特定項目 -> 預設為商品"
+                reason = "無節目名稱預設為商品"
                 if '票' in spec:
                     needs_confirm = True
-                    reason = "無節目名稱但品名含『票』字，需人工確認"
+                    reason = "無節目名稱但含『票』字需確認"
 
         return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, rev, needs_confirm, reason])
 
-    df[['營收分類', '人次分類', '計算人次', '電競人次', '含稅營收', '需確認', '系統判斷依據']] = df.apply(classify, axis=1)
+    df[['營收分類', '人次分類', '計算人次', '電競人次', '含稅營收', '需確認', '診斷依據']] = df.apply(classify, axis=1)
     return df
 
-# --- 2. 網頁介面 ---
-st.set_page_config(page_title="大飛數據分析系統", layout="wide")
-st.title("📊 大飛數據 - 多功能對帳系統")
+# --- 3. 網頁介面 ---
+st.set_page_config(page_title="大飛數據對帳系統", layout="wide")
+st.title("📊 大飛數據 - 多人操作對帳系統 (含自動假期判定)")
 
 uploaded_file = st.file_uploader("1. 上傳原始 Excel 或 CSV", type=['csv', 'xlsx'])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-    processed = process_data(df)
-    
-    # 月份篩選器 (側邊欄)
-    st.sidebar.header("日期篩選")
-    all_months = sorted(processed['月份'].unique().tolist())
-    selected_months = st.sidebar.multiselect("選擇月份 (可多選)", all_months, default=all_months)
-    
-    # 根據篩選過濾數據
-    filtered_df = processed[processed['月份'].isin(selected_months)]
-
-    # --- 數據概覽看板 ---
-    st.header(f"📈 數據概覽 ({', '.join(selected_months) if len(selected_months) < 3 else '多月份總和'})")
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("總計營收", f"{filtered_df['含稅營收'].sum():,.0f}")
-    c2.metric("i-Ride 總人次", f"{filtered_df['計算人次'].sum():,.0f}")
-    c3.metric("電競館總人次", f"{filtered_df['電競人次'].sum():,.0f}")
-
-    # --- 詳細統計表格 ---
-    t1, t2 = st.columns(2)
-    with t1:
-        st.subheader("💰 營收類別合計")
-        rev_sum = filtered_df.groupby('營收分類')['含稅營收'].sum().reset_index()
-        st.table(rev_sum.style.format({'含稅營收': '{:,.0f}'}))
-        
-    with t2:
-        st.subheader("👥 人次類別合計")
-        # 合併計算 i-Ride 與 電競人次 (分開呈現)
-        att_sum = filtered_df.groupby('人次分類')[['計算人次', '電競人次']].sum().reset_index()
-        st.table(att_sum)
-
-    # --- 異常攔截區 ---
-    pending = filtered_df[filtered_df['需確認'] == True]
-    if not pending.empty:
-        st.error(f"⚠️ 發現 {len(pending)} 筆需人工確認的項目")
-        st.write("請根據下方『系統判斷依據』決定如何調整邏輯：")
-        st.dataframe(pending[['品名規格', '節目名稱', '客戶編號', '系統判斷依據', '含稅營收']])
-
-    st.subheader("原始數據明細")
-    st.dataframe(filtered_df)
+    df = pd.read_csv(uploaded
