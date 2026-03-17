@@ -4,33 +4,33 @@ import datetime
 
 # --- 1. 台灣國定假日定義 (2025-2026) ---
 def get_holiday_type(date):
-    # 轉為字串方便比對
+    # 修正：檢查是否為空值 (NaT)
+    if pd.isna(date):
+        return "未知"
+    
     d_str = date.strftime('%Y-%m-%d')
     
-    # 2025-2026 台灣國定連假/紀念日清單 (範例，可持續補充)
+    # 2025-2026 台灣國定連假/紀念日清單
     holidays = [
-        '2025-01-01', # 元旦
-        '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-02', # 春節
-        '2025-02-28', # 228
-        '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', # 清明兒童
-        '2025-05-31', '2025-06-01', '2025-06-02', # 端午
-        '2025-10-04', '2025-10-05', '2025-10-06', # 中秋
-        '2025-10-10', # 國慶
-        '2026-01-01', # 元旦
-        '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', # 2026春節
-        '2026-02-28', '2026-03-01', '2026-03-02', # 2026 228
+        '2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-02',
+        '2025-02-28', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-31', '2025-06-01', '2025-06-02',
+        '2025-10-04', '2025-10-05', '2025-10-06', '2025-10-10', '2026-01-01', 
+        '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22',
+        '2026-02-28', '2026-03-01', '2026-03-02',
     ]
     
-    # 判斷邏輯：國定假日 OR 週六(5) OR 週日(6)
     if d_str in holidays or date.weekday() >= 5:
         return "假日"
     return "平日"
 
 # --- 2. 核心處理函數 ---
 def process_data(df):
-    # 自動補齊日期相關欄位
+    # 修正：強制轉換日期並排除無法轉換的格式
     if '交易日期' in df.columns:
-        df['交易日期'] = pd.to_datetime(df['交易日期'])
+        df['交易日期'] = pd.to_datetime(df['交易日期'], errors='coerce')
+        # 排除掉日期完全為空的列 (預防 Excel 空白列)
+        df = df.dropna(subset=['交易日期']).copy()
+        
         df['月份'] = df['交易日期'].dt.strftime('%Y/%m月')
         df['星期'] = df['交易日期'].dt.day_name().replace({
             'Monday':'星期一','Tuesday':'星期二','Wednesday':'星期三',
@@ -95,22 +95,22 @@ def process_data(df):
 
 # --- 3. 網頁介面 ---
 st.set_page_config(page_title="大飛數據對帳系統", layout="wide")
-st.title("📊 大飛數據 - 多人操作對帳系統 (含自動假期判定)")
+st.title("📊 大飛數據 - 多人操作對帳系統")
 
 uploaded_file = st.file_uploader("1. 上傳原始 Excel 或 CSV", type=['csv', 'xlsx'])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+    # 讀取數據，並確保「客戶編號」不被自動當成數字（避免 P0001 變 1）
+    df = pd.read_csv(uploaded_file, dtype={'客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'客戶編號': str})
+    
     processed = process_data(df)
     
-    # 側邊欄：月份與假期篩選
+    # 側邊欄篩選
     st.sidebar.header("數據篩選")
     sel_months = st.sidebar.multiselect("選擇月份", sorted(processed['月份'].unique()), default=processed['月份'].unique())
     sel_holiday = st.sidebar.multiselect("選擇日期類型", ["平日", "假日"], default=["平日", "假日"])
     
-    # 過濾數據
-    mask = (processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))
-    f_df = processed[mask]
+    f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))]
 
     # 看板
     st.header(f"📈 數據看板")
@@ -136,3 +136,7 @@ if uploaded_file:
 
     st.subheader("數據明細")
     st.dataframe(f_df)
+    
+    # 增加下載功能
+    csv = f_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button("📥 下載目前篩選的報表", csv, "對齊後報表.csv", "text/csv")
