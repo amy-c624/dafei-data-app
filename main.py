@@ -100,4 +100,39 @@ st.title("📊 大飛數據 - 多人操作對帳系統 (含自動假期判定)")
 uploaded_file = st.file_uploader("1. 上傳原始 Excel 或 CSV", type=['csv', 'xlsx'])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded
+    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+    processed = process_data(df)
+    
+    # 側邊欄：月份與假期篩選
+    st.sidebar.header("數據篩選")
+    sel_months = st.sidebar.multiselect("選擇月份", sorted(processed['月份'].unique()), default=processed['月份'].unique())
+    sel_holiday = st.sidebar.multiselect("選擇日期類型", ["平日", "假日"], default=["平日", "假日"])
+    
+    # 過濾數據
+    mask = (processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))
+    f_df = processed[mask]
+
+    # 看板
+    st.header(f"📈 數據看板")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("總計營收 (含稅)", f"{f_df['含稅營收'].sum():,.0f}")
+    c2.metric("i-Ride 總人次", f"{f_df['計算人次'].sum():,.0f}")
+    c3.metric("電競館總人次", f"{f_df['電競人次'].sum():,.0f}")
+
+    # 報表
+    t1, t2 = st.columns(2)
+    with t1:
+        st.subheader("💰 營收類別合計")
+        st.table(f_df.groupby('營收分類')['含稅營收'].sum().reset_index().style.format({'含稅營收': '{:,.0f}'}))
+    with t2:
+        st.subheader("👥 人次類別合計")
+        st.table(f_df.groupby('人次分類')[['計算人次', '電競人次']].sum().reset_index())
+
+    # 需確認區
+    pending = f_df[f_df['需確認'] == True]
+    if not pending.empty:
+        st.error(f"⚠️ 發現 {len(pending)} 筆需確認項目")
+        st.dataframe(pending[['品名規格', '客戶編號', '診斷依據', '含稅營收']])
+
+    st.subheader("數據明細")
+    st.dataframe(f_df)
