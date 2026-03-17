@@ -21,7 +21,7 @@ def check_password():
 
 st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
 
-# 套用 CSS 樣式讓表格合計列顯眼
+# 套用 CSS 樣式
 st.markdown("""
     <style>
     .highlight { background-color: #D6EAF8 !important; font-weight: bold; }
@@ -33,6 +33,7 @@ if check_password():
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
+        # 包含 2025 與 2026 的假期清單
         holidays = ['2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-02', '2025-02-28', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-31', '2025-06-01', '2025-06-02', '2025-10-04', '2025-10-05', '2025-10-06', '2025-10-10', '2026-01-01', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-28', '2026-03-01', '2026-03-02']
         return "假日" if (d_str in holidays or date.weekday() >= 5) else "平日"
 
@@ -59,7 +60,7 @@ if check_password():
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
-            # 強制排除：免費票等不計人次
+            # 強制排除
             if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): res_att_cat = "無視"
 
             if pname != "":
@@ -78,7 +79,6 @@ if check_password():
                     elif '妖怪' in spec: res_rev = "妖怪周邊商品"
                     else: res_rev = "周邊商品"
                 
-                # 無節目名稱者(除電競)，人次與觀看數歸零
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
                     if res_rev != "票務收入": res_att_cat = "無視"
@@ -86,10 +86,15 @@ if check_password():
             return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev, pname])
 
         df[['營收分類', '人次分類', '計算人次', '電競人次', '觀看總數', '含稅營收', '清單節目名稱']] = df.apply(classify, axis=1)
+        # 強制轉換數值型態，避免後續計算出錯
+        df['計算人次'] = pd.to_numeric(df['計算人次'], errors='coerce').fillna(0)
+        df['觀看總數'] = pd.to_numeric(df['觀看總數'], errors='coerce').fillna(0)
+        df['電競人次'] = pd.to_numeric(df['電競人次'], errors='coerce').fillna(0)
+        df['含稅營收'] = pd.to_numeric(df['含稅營收'], errors='coerce').fillna(0)
+        
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
-    st.title("📊 i-Ride 營收數據分析")
     uploaded_file = st.file_uploader("1. 上傳原始檔", type=['csv', 'xlsx'])
 
     if uploaded_file:
@@ -115,21 +120,33 @@ if check_password():
             st.subheader("💰 營收分類合計")
             rev_table = f_df.groupby('營收分類')['含稅營收'].sum().reset_index()
             rev_total = f_df['統計用營收'].sum()
-            rev_final = pd.concat([rev_table, pd.DataFrame([{'營收分類': '合計(不含無視項目)', '含稅營收': rev_total}])])
-            # 套用醒目底色邏輯
-            st.table(rev_final.style.format({'含稅營收': '{:,.0f}'}).apply(lambda x: ['background-color: #D6EAF8; font-weight: bold' if x.name == len(rev_final)-1 else '' for _ in x], axis=1))
+            rev_final = pd.concat([rev_table, pd.DataFrame([{'營收分類': '合計(不含無視項目)', '含稅營收': rev_total}])]).reset_index(drop=True)
+            
+            # 修正後的表格顯示邏輯
+            st.table(rev_final.style.format({'含稅營收': '{:,.0f}'}).apply(
+                lambda x: ['background-color: #D6EAF8; font-weight: bold' if x.name == len(rev_final)-1 else '' for _ in x], axis=1))
         
         with t2:
             st.subheader("👥 人次分類合計")
             att_table = f_df.groupby('人次分類')[['計算人次', '觀看總數', '電競人次']].sum().reset_index()
-            att_final = pd.concat([att_table, pd.DataFrame([{'人次分類': '合計(不含無視項目)', '計算人次': f_df['計算人次'].sum(), '觀看總數': f_df['觀看總數'].sum(), '電競人次': f_df['電競人次'].sum()}])])
-            st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}).apply(lambda x: ['background-color: #D6EAF8; font-weight: bold' if x.name == len(att_final)-1 else '' for _ in x], axis=1))
+            att_final = pd.concat([att_table, pd.DataFrame([{
+                '人次分類': '合計(不含無視項目)', 
+                '計算人次': f_df['計算人次'].sum(), 
+                '觀看總數': f_df['觀看總數'].sum(), 
+                '電競人次': f_df['電競人次'].sum()
+            }])]).reset_index(drop=True)
+            
+            st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}).apply(
+                lambda x: ['background-color: #D6EAF8; font-weight: bold' if x.name == len(att_final)-1 else '' for _ in x], axis=1))
 
         st.divider()
         st.subheader("🎬 影片觀看人數統計")
         watch_df = f_df[f_df['清單節目名稱'] != ""].groupby('清單節目名稱')['觀看總數'].sum().reset_index().rename(columns={'清單節目名稱': '節目名稱', '觀看總數': '觀看人數'})
-        watch_final = pd.concat([watch_df.sort_values(by='觀看人數', ascending=False), pd.DataFrame([{'節目名稱': '總觀看合計', '觀看人數': f_df['觀看總數'].sum()}])])
-        st.table(watch_final.style.format({'觀看人數': '{:,.0f}'}).apply(lambda x: ['background-color: #FCF3CF; font-weight: bold' if x.name == len(watch_final)-1 else '' for _ in x], axis=1))
+        watch_final = pd.concat([watch_df.sort_values(by='觀看人數', ascending=False), 
+                                pd.DataFrame([{'節目名稱': '總觀看合計', '觀看人數': f_df['觀看總數'].sum()}])]).reset_index(drop=True)
+        
+        st.table(watch_final.style.format({'觀看人數': '{:,.0f}'}).apply(
+            lambda x: ['background-color: #FCF3CF; font-weight: bold' if x.name == len(watch_final)-1 else '' for _ in x], axis=1))
 
         st.subheader("數據明細")
         st.dataframe(f_df)
