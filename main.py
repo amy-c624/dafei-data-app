@@ -21,7 +21,6 @@ def check_password():
 
 st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
 
-# 深淺色模式通用的藍色醒目背景
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
@@ -42,19 +41,20 @@ if check_password():
         def classify(row):
             pname = str(row.get('節目名稱', '')).strip()
             spec = str(row.get('品名規格', '')).strip()
-            # 優先讀取「會員卡號」，若無則讀取「客戶編號」
             cid = str(row.get('會員卡號', row.get('客戶編號', ''))).strip().upper()
-            
             qty = pd.to_numeric(row.get('交易數量', 0), errors='coerce') or 0
             rev = pd.to_numeric(row.get('原幣含稅金額', 0), errors='coerce') or 0
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "商品收入", "無視", 0, 0, 0
 
-            # --- 人次分類判定邏輯 ---
-            if (cid == 'Z00054') or ('校園' in spec) or ('校園' in pname):
-                res_att_cat = "校園優惠票"
-            elif (cid.startswith('P')) or ('親子' in spec) or ('親子' in pname):
+            # --- [修正] 人次分類邏輯 ---
+            # 1. 親子卡：會員 P 開頭 且 品名精確匹配 "成人票"
+            if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
+            # 2. 校園票：會員 Z00054 且 品名精確匹配 "VIP貴賓票核銷"
+            elif cid == 'Z00054' and spec == "VIP貴賓票核銷":
+                res_att_cat = "校園優惠票"
+            # 3. 其他分類 (包含判斷)
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
             elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
             elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
@@ -63,27 +63,39 @@ if check_password():
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
-            if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): 
+            # 人次無視清單
+            if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票務核銷']): 
                 res_att_cat = "無視"
 
-            # --- 營收分類判定 ---
+            # --- [修正] 營收分類邏輯 ---
             if pname != "" and pname != "nan":
                 res_rev, res_watch_val = "票務收入", qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
                 res_att_val = n_films * qty
             else:
+                # 判斷電競
                 esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
                 if any(k in spec for k in esports_k): 
                     res_rev, res_att_cat, res_esports_val = "電競館收入", "電競館", qty
-                elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台收入"
-                elif any(x in spec for x in ['VIP貴賓券', '商品兌換券', '票券核銷']): res_rev = "無視"
-                elif '團購兌換券' in spec: res_rev = "預售票收入"
-                elif '票' in spec: res_rev = "票務收入"
+                # 營收分類判定
+                elif any(x in spec for x in ['門票分潤', '線上票券']): 
+                    res_rev = "平台收入"
+                elif any(x in spec for x in ['VIP貴賓券', '商品兌換券', '票券核銷']): 
+                    res_rev = "無視"
+                elif '團購兌換券' in spec: 
+                    res_rev = "預售票收入"
+                elif '票' in spec: 
+                    res_rev = "票務收入"
                 else:
-                    res_rev = "周邊商品"
-                    if '巨人' in spec: res_rev = "巨人周邊商品"
-                    elif '妖怪' in spec: res_rev = "妖怪周邊商品"
+                    # 周邊商品邏輯
+                    if '巨人' in spec: 
+                        res_rev = "巨人周邊商品"
+                    elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']:
+                        res_rev = "妖怪周邊商品"
+                    else:
+                        res_rev = "周邊商品"
                 
+                # 若無節目名稱且非電競，人次與觀看歸零
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
                     if res_rev != "票務收入": res_att_cat = "無視"
@@ -97,7 +109,6 @@ if check_password():
     uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
 
     if uploaded_file:
-        # 強制將關鍵欄位讀為字串
         df = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
         
         processed = process_data(df)
