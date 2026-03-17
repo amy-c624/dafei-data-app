@@ -84,3 +84,4 @@ if check_password():
                 elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']):
                     res_att_cat = "親子卡" if ('成人票' in spec and cid.startswith('P')) else "散客"
                 elif
+
