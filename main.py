@@ -4,38 +4,26 @@ import datetime
 
 # --- 0. 密碼驗證功能 ---
 def check_password():
-    """如果密碼正確，則回傳 True"""
     def password_entered():
-        # --- 在這裡設定您的專屬密碼 ---
-        if st.session_state["password"] == "Brogent42646262": 
+        if st.session_state["password"] == "Brogent": # 您可以自行修改此密碼
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # 驗證後刪除輸入內容以防外流
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
-        # 第一次進入網頁，顯示輸入框
-        st.text_input(
-            "請輸入公司內部授權密碼", type="password", on_change=password_entered, key="password"
-        )
+        st.text_input("請輸入公司內部授權密碼", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # 密碼錯誤，再次顯示輸入框
-        st.text_input(
-            "密碼錯誤，請重新輸入", type="password", on_change=password_entered, key="password"
-        )
-        st.error("😕 密碼不正確，請聯繫管理員。")
+        st.text_input("密碼錯誤，請重新輸入", type="password", on_change=password_entered, key="password")
+        st.error("😕 密碼不正確。")
         return False
     else:
-        # 密碼正確
         return True
 
 # --- 開始網頁渲染 ---
 st.set_page_config(page_title="大飛數據對帳系統", layout="wide")
 
 if check_password():
-    # --- 以下是原本的核心程式邏輯，只有密碼正確才會執行 ---
-    
     # 1. 台灣國定假日定義
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
@@ -73,7 +61,7 @@ if check_password():
             qty = row['交易數量'] if pd.notna(row['交易數量']) else 0
             rev = row['原幣含稅金額'] if pd.notna(row['原幣含稅金額']) else 0
             res_rev, res_att_cat, res_att_val, res_esports_val = "商品收入", "無視", 0, 0
-            reason, needs_confirm = "", False
+            needs_confirm = False
 
             if pname != "":
                 res_rev = "票務"
@@ -83,5 +71,59 @@ if check_password():
                 elif 'VIP貴賓券核銷' in spec: res_att_cat = "校園優惠票" if cid == 'Z00054' else "VIP"
                 elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']):
                     res_att_cat = "親子卡" if ('成人票' in spec and cid.startswith('P')) else "散客"
-                elif
+                elif '平台通路票' in spec: res_att_cat = "平台"
+                elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
+                elif '股東券' in spec: res_att_cat = "股東"
+                elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
+                elif any(x in spec for x in ['團購兌換券展延', '團購兌換券核銷']): res_att_cat = "團購券"
+                else: res_att_cat, needs_confirm = "待確認票種", True
+            else:
+                esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
+                if any(k in spec for k in esports_k):
+                    res_rev, res_att_cat, res_esports_val = "電競館", "電競館", qty
+                elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台收入"
+                elif any(x in spec for x in ['VIP貴賓券', '商品兌換券', '票券核銷']): res_rev, rev = "無視", 0
+                elif '團購兌換券' in spec: res_rev = "預售票"
+                else:
+                    if '票' in spec: needs_confirm = True
+            return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, rev, needs_confirm])
 
+        df[['營收分類', '人次分類', '計算人次', '電競人次', '含稅營收', '需確認']] = df.apply(classify, axis=1)
+        return df
+
+    # --- 3. 網頁呈現 ---
+    st.title("📊 大飛數據 - 多人操作對帳系統")
+    uploaded_file = st.file_uploader("1. 上傳原始檔", type=['csv', 'xlsx'])
+
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file, dtype={'客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'客戶編號': str})
+        processed = process_data(df)
+        
+        st.sidebar.header("數據篩選")
+        sel_months = st.sidebar.multiselect("月份", sorted(processed['月份'].unique()), default=processed['月份'].unique())
+        sel_holiday = st.sidebar.multiselect("日期類型", ["平日", "假日"], default=["平日", "假日"])
+        
+        f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))]
+
+        st.header(f"📈 數據看板")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("總計營收", f"{f_df['含稅營收'].sum():,.0f}")
+        c2.metric("i-Ride 人次", f"{f_df['計算人次'].sum():,.0f}")
+        c3.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
+
+        t1, t2 = st.columns(2)
+        with t1:
+            st.subheader("💰 營收分類合計")
+            st.table(f_df.groupby('營收分類')['含稅營收'].sum().reset_index().style.format({'含稅營收': '{:,.0f}'}))
+        with t2:
+            st.subheader("👥 人次分類合計")
+            st.table(f_df.groupby('人次分類')[['計算人次', '電競人次']].sum().reset_index())
+
+        pending = f_df[f_df['需確認'] == True]
+        if not pending.empty:
+            st.error(f"⚠️ 需確認項目 ({len(pending)} 筆)")
+            st.dataframe(pending[['品名規格', '客戶編號', '含稅營收']])
+
+        st.subheader("數據明細")
+        st.dataframe(f_df)
+        st.download_button("📥 下載報表", f_df.to_csv(index=False).encode('utf-8-sig'), "對齊報表.csv")
