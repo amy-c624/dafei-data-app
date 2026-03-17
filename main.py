@@ -21,6 +21,7 @@ def check_password():
 
 st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
 
+# 設定醒目顏色
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
@@ -41,33 +42,38 @@ if check_password():
         def classify(row):
             pname = str(row.get('節目名稱', '')).strip()
             spec = str(row.get('品名規格', '')).strip()
+            # 優先讀取「會員卡號」，若無則讀取「客戶編號」
             cid = str(row.get('會員卡號', row.get('客戶編號', ''))).strip().upper()
+            
             qty = pd.to_numeric(row.get('交易數量', 0), errors='coerce') or 0
             rev = pd.to_numeric(row.get('原幣含稅金額', 0), errors='coerce') or 0
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "商品收入", "無視", 0, 0, 0
 
-            # --- [修正] 人次分類邏輯 ---
-            # 1. 親子卡：會員 P 開頭 且 品名精確匹配 "成人票"
+            # --- [最新正名邏輯] 人次分類 ---
+            
+            # 1. 親子卡：會員 P 開頭 且 品名精確等於 "成人票"
             if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
-            # 2. 校園票：會員 Z00054 且 品名精確匹配 "VIP貴賓票核銷"
-            elif cid == 'Z00054' and spec == "VIP貴賓票核銷":
+            
+            # 2. 校園票：會員精確等於 Z00054 且 品名精確等於 "VIP貴賓券核銷"
+            elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
                 res_att_cat = "校園優惠票"
+                
             # 3. 其他分類 (包含判斷)
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
             elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
-            elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
+            elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP" # 非 Z00054 的會掉到這裡
             elif any(x in spec for x in ['團購兌換券展延', '團購兌換券核銷']): res_att_cat = "團購券"
             elif '平台通路票' in spec: res_att_cat = "平台"
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
-            # 人次無視清單
+            # 人次無視清單 (免費/券差額/員工等)
             if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票務核銷']): 
                 res_att_cat = "無視"
 
-            # --- [修正] 營收分類邏輯 ---
+            # --- 營收分類 ---
             if pname != "" and pname != "nan":
                 res_rev, res_watch_val = "票務收入", qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -106,6 +112,7 @@ if check_password():
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
+    # --- 介面呈現 ---
     uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
 
     if uploaded_file:
