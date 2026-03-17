@@ -47,7 +47,7 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # --- [A] 人次分類判定 (維持正確版) ---
+            # --- [A] 人次分類判定 ---
             if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
@@ -60,11 +60,11 @@ if check_password():
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
-            # 人次無視判定
-            if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票券核銷']): 
+            # 人次無視判定 (依照指示加入 券類溢收-商品)
+            if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收-商品', '商品兌換券', '票券核銷']): 
                 res_att_cat = "無視"
 
-            # 處理觀看與人次
+            # 計算觀看/人次
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -77,28 +77,32 @@ if check_password():
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
 
-            # --- [B] 營收分類判定 (關鍵精確匹配) ---
-            # 優先 1: 營收無視 (完全匹配關鍵字)
+            # --- [B] 營營收分類判定 (核心層級定義) ---
+            # 1. 營收無視
             if spec in ['商品兌換券', '票券核銷']:
                 res_rev = "無視"
-            # 優先 2: 平台收入
+            # 2. 平台與預售
             elif any(x in spec for x in ['門票分潤', '線上票券']):
                 res_rev = "平台收入"
-            # 優先 3: 預售票收入
             elif spec == '團購兌換券':
                 res_rev = "預售票收入"
-            # 優先 4: 特定周邊
+            # 3. [New] 用戶指定特殊判定層 (精確匹配)
+            elif spec == "券差額":
+                res_rev = "票務收入"
+            elif spec == "券類溢收-商品":
+                res_rev = "周邊商品"
+            # 4. 特定周邊
             elif '巨人' in spec:
                 res_rev = "巨人周邊商品"
             elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']:
                 res_rev = "妖怪周邊商品"
-            # 優先 5: 票務收入 (口袋邏輯)
+            # 5. 票務收入口袋邏輯 (排除上述後)
             elif (pname != "" and pname != "nan") or (res_att_cat not in ["無視", "周邊商品", "電競館"]) or ("票" in spec) or ("券" in spec):
                 res_rev = "票務收入"
-            # 優先 6: 電競館營收
+            # 6. 電競
             elif res_att_cat == "電競館":
                 res_rev = "電競館收入"
-            # 最後口袋: 周邊商品
+            # 7. 最後其餘
             else:
                 res_rev = "周邊商品"
 
@@ -135,9 +139,8 @@ if check_password():
         with t1:
             st.subheader("💰 營收分類合計")
             rev_table = f_df.groupby('營收分類')['含稅營收'].sum().reset_index()
-            # 總金額對帳檢查
             rev_final = pd.concat([rev_table, pd.DataFrame([{'營收分類': '合計(不含無視)', '含稅營收': f_df['統計用營收'].sum()}])]).reset_index(drop=True)
-            st.table(rev_final.style.format({'含稅營營收': '{:,.0f}', '含稅營收': '{:,.0f}'}).apply(apply_style, df_len=len(rev_final), axis=1))
+            st.table(rev_final.style.format({'含稅營收': '{:,.0f}'}).apply(apply_style, df_len=len(rev_final), axis=1))
         
         with t2:
             st.subheader("👥 人次分類合計")
