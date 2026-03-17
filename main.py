@@ -21,8 +21,8 @@ def check_password():
 
 st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
 
-# 適應深淺色模式
-HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.2)" 
+# 深淺色模式通用的藍色醒目背景
+HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
     # 1. 假期定義
@@ -40,6 +40,7 @@ if check_password():
         df['假期'] = df['交易日期'].apply(get_holiday_type)
 
         def classify(row):
+            # 取得原始字串並清理
             pname = str(row['節目名稱']).strip() if pd.notna(row['節目名稱']) else ""
             spec = str(row['品名規格']).strip()
             cid = str(row['客戶編號']).strip().upper() if pd.notna(row['客戶編號']) else ""
@@ -49,14 +50,17 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "商品收入", "無視", 0, 0, 0
 
-            # --- 人次分類邏輯 ---
-            # 優先 1: 校園優惠票 (Z00054 或 品名包含校園)
-            if (cid == 'Z00054') or ('校園' in spec) or ('VIP' in spec and cid == 'Z00054'):
-                res_att_cat = "校園優惠票"
-            # 優先 2: 親子卡 (P開頭 或 品名包含親子卡)
-            elif (cid.startswith('P')) or ('親子卡' in spec):
+            # --- [關鍵] 人次分類判定邏輯：優先權由高至低 ---
+            
+            # 優先 A: 親子卡 (cid 為 P 開頭，或品名含親子卡)
+            if (cid.startswith('P')) or ('親子卡' in spec):
                 res_att_cat = "親子卡"
-            # 優先 3: 其他身分
+            
+            # 優先 B: 校園優惠票 (cid 為 Z00054，或品名含校園)
+            elif (cid == 'Z00054') or ('校園' in spec):
+                res_att_cat = "校園優惠票"
+            
+            # 優先 C: 其他特定身份
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
             elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
             elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
@@ -65,10 +69,11 @@ if check_password():
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
+            # 優先 D: 強制排除（免費/員工/差額）
             if any(x in spec for x in ['免費票', '券差額', '員工優惠票']): 
                 res_att_cat = "無視"
 
-            # --- 營收分類 ---
+            # --- 營收分類判定 ---
             if pname != "":
                 res_rev, res_watch_val = "票務收入", qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -86,30 +91,29 @@ if check_password():
                     elif '妖怪' in spec: res_rev = "妖怪周邊商品"
                     else: res_rev = "周邊商品"
                 
+                # 若無節目名稱且非電競，人次與觀看歸零
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
                     if res_rev != "票務收入": res_att_cat = "無視"
 
             return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev, pname])
 
-        # 這裡修正了原本打錯的 "含稅營營收"
         df[['營收分類', '人次分類', '計算人次', '電競人次', '觀看總數', '含稅營收', '清單節目名稱']] = df.apply(classify, axis=1)
         
-        # 確保含稅營收是數值型態
-        df['含稅營收'] = pd.to_numeric(df['含稅營收'], errors='coerce').fillna(0)
+        # 轉換數值
+        for c in ['計算人次', '電競人次', '觀看總數', '含稅營收']:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
+    # --- 介面開始 ---
     uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
 
     if uploaded_file:
-        df = pd.read_csv(uploaded_file, dtype=object) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype=object)
+        # 強制將客戶編號讀為字串，避免 P 或 Z 開頭消失
+        df = pd.read_csv(uploaded_file, dtype={'客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'客戶編號': str})
         
-        num_cols = ['交易數量', '原幣含稅金額']
-        for col in num_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
         processed = process_data(df)
         
         st.sidebar.header("📅 數據篩選")
@@ -119,8 +123,8 @@ if check_password():
         
         f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))].copy()
 
-        # --- 顯示合計卡片 ---
-        st.header(f"📈 營收統計分析")
+        # --- 合計卡片 ---
+        st.header(f"📊 營收統計分析")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("總計營收", f"{f_df['統計用營收'].sum():,.0f}")
         c2.metric("i-Ride 人次", f"{f_df['計算人次'].sum():,.0f}")
@@ -130,6 +134,7 @@ if check_password():
         def apply_style(x, df_len):
             return [f'background-color: {HIGHLIGHT_COLOR}; font-weight: bold' if x.name == df_len-1 else '' for _ in x]
 
+        # --- 表格顯示 ---
         t1, t2 = st.columns(2)
         with t1:
             st.subheader("💰 營收分類合計")
@@ -139,6 +144,7 @@ if check_password():
         
         with t2:
             st.subheader("👥 人次分類合計")
+            # 產出包含親子卡與校園票的表格
             att_table = f_df.groupby('人次分類')[['計算人次', '觀看總數', '電競人次']].sum().reset_index()
             att_final = pd.concat([att_table, pd.DataFrame([{
                 '人次分類': '合計(不含無視)', 
@@ -146,15 +152,6 @@ if check_password():
             }])]).reset_index(drop=True)
             st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}).apply(apply_style, df_len=len(att_final), axis=1))
 
-        # --- 異常診斷區 ---
         st.divider()
-        with st.expander("🔍 數據異常診斷 (親子卡/校園票檢查)"):
-            check_cid = processed[processed['客戶編號'].str.contains('Z|P', na=False, case=False)]
-            if not check_cid.empty:
-                st.write("偵測到潛在的特殊票種：")
-                st.dataframe(check_cid[['客戶編號', '品名規格', '人次分類', '計算人次']])
-            else:
-                st.warning("原始資料中完全找不到 客戶編號 包含 Z 或 P 的資料。請檢查原始檔的「客戶編號」欄位名稱是否正確。")
-
-        st.subheader("📄 完整數據明細")
+        st.subheader("📄 數據明細")
         st.dataframe(f_df)
