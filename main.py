@@ -21,6 +21,7 @@ def check_password():
 
 st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
 
+# 設定醒目顏色
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
@@ -41,13 +42,16 @@ if check_password():
         def classify(row):
             pname = str(row.get('節目名稱', '')).strip()
             spec = str(row.get('品名規格', '')).strip()
+            # 優先讀取「會員卡號」，若無則讀取「客戶編號」
             cid = str(row.get('會員卡號', row.get('客戶編號', ''))).strip().upper()
+            
             qty = pd.to_numeric(row.get('交易數量', 0), errors='coerce') or 0
             rev = pd.to_numeric(row.get('原幣含稅金額', 0), errors='coerce') or 0
             
+            # 初始化
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # --- [人次分類] 完全回到正確邏輯版 ---
+            # --- [A] 人次分類 (維持 100% 正確版邏輯) ---
             if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
@@ -60,53 +64,72 @@ if check_password():
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             
+            # 人次無視判定
             if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票務核銷']): 
                 res_att_cat = "無視"
 
-            # 計算觀看與人次
+            # 處理觀看數與人次數值
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
                 res_att_val = n_films * qty
             else:
+                # 判定電競人次
                 esports_k = ['LED體感','VR','4D劇院','飛行模擬器','極速賽艇','體感賽車','僵屍籠','殭屍籠']
                 if any(k in spec for k in esports_k): 
                     res_att_cat = "電競館"
                     res_esports_val = qty
+                # 若非電競，則人次與觀看歸零
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
 
-            # --- [營收分類] 回到穩定版並微調票務歸類 ---
-            # 1. 優先判定無視 (總營收正確的關鍵)
+            # --- [B] 營收分類 (修正重點邏輯) ---
+            # 優先 1: 營收無視清單 (與人次無視不同)
             if any(x in spec for x in ['商品兌換券', '票務核銷']):
                 res_rev = "無視"
-            # 2. 判定特殊科目
-            elif any(x in spec for x in ['門票分潤', '線上票券']):
+            
+            # 優先 2: 平台與預售科目 (需優先攔截，避免被票務抓走)
+            elif any(x in spec for x in ['門票分潤', '線上票券']) or res_att_cat == "平台":
                 res_rev = "平台收入"
-            elif '團購兌換券' in spec:
+            elif '團購兌換券' in spec or res_att_cat == "團購券":
                 res_rev = "預售票收入"
+            
+            # 優先 3: 票務收入 (口袋邏輯：滿足以下任一即是票務)
+            # a. 品名含「票」或「券」 (解決券差額等問題)
+            # b. 有節目名稱
+            # c. 人次分類屬於特定票務身分
+            elif ("票" in spec) or ("券" in spec) or (pname != "" and pname != "nan") or (res_att_cat not in ["無視", "周邊商品", "電競館"]):
+                res_rev = "票務收入"
+            
+            # 優先 4: 電競館營收
+            elif res_att_cat == "電競館":
+                res_rev = "電競館收入"
+            
+            # 優先 5: 特定周邊
             elif '巨人' in spec:
                 res_rev = "巨人周邊商品"
             elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']:
                 res_rev = "妖怪周邊商品"
-            # 3. 票務收入口袋邏輯 (包含人次為無視但含有票/券字眼的項目)
-            elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品", "電競館"]):
-                res_rev = "票務收入"
-            elif res_att_cat == "電競館":
-                res_rev = "電競館收入"
+            
+            # 優先 6: 其他所有項目歸周邊
             else:
                 res_rev = "周邊商品"
 
             return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev, pname])
 
+        # 套用分類
         df[['營收分類', '人次分類', '計算人次', '電競人次', '觀看總數', '含稅營收', '清單節目名稱']] = df.apply(classify, axis=1)
+        
+        # 營收加總邏輯：除了 "無視" 之外都計入統計
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
+    # --- 介面呈現 ---
     uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
 
     if uploaded_file:
         df = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
+        
         processed = process_data(df)
         
         st.sidebar.header("📅 數據篩選")
@@ -130,6 +153,7 @@ if check_password():
         with t1:
             st.subheader("💰 營收分類合計")
             rev_table = f_df.groupby('營收分類')['含稅營收'].sum().reset_index()
+            # 確保合計行包含所有統計用營收
             rev_final = pd.concat([rev_table, pd.DataFrame([{'營收分類': '合計(不含無視)', '含稅營收': f_df['統計用營收'].sum()}])]).reset_index(drop=True)
             st.table(rev_final.style.format({'含稅營收': '{:,.0f}'}).apply(apply_style, df_len=len(rev_final), axis=1))
         
