@@ -24,22 +24,12 @@ st.set_page_config(page_title="i-Ride 營收數據分析系統", layout="wide")
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
-    # 1. 假期定義 (2025-2026 最新版)
+    # 1. 假期定義
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
-        holidays_2025 = [
-            '2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-01', '2025-02-02', 
-            '2025-02-28', '2025-03-01', '2025-03-02', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-01', '2025-05-30', '2025-05-31', 
-            '2025-06-01', '2025-09-27', '2025-09-28', '2025-09-29', '2025-10-04', '2025-10-05', '2025-10-06', '2025-10-10', '2025-10-11', '2025-10-12', 
-            '2025-10-24', '2025-10-25', '2025-10-26', '2025-12-25'
-        ]
-        holidays_2026 = [
-            '2026-01-01', '2026-02-14', '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', 
-            '2026-02-27', '2026-02-28', '2026-03-01', '2026-04-03', '2026-04-04', '2026-04-05', '2026-04-06', '2026-05-01', '2026-05-02', '2026-05-03', 
-            '2026-06-19', '2026-06-20', '2026-06-21', '2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28', '2026-10-09', '2026-10-10', '2026-10-11', 
-            '2026-10-24', '2026-10-25', '2026-10-26', '2026-12-25', '2026-12-26', '2026-12-27'
-        ]
+        holidays_2025 = ['2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-01', '2025-02-02', '2025-02-28', '2025-03-01', '2025-03-02', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-01', '2025-05-30', '2025-05-31', '2025-06-01', '2025-09-27', '2025-09-28', '2025-09-29', '2025-10-04', '2025-10-05', '2025-10-06', '2025-10-10', '2025-10-11', '2025-10-12', '2025-10-24', '2025-10-25', '2025-10-26', '2025-12-25']
+        holidays_2026 = ['2026-01-01', '2026-02-14', '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-27', '2026-02-28', '2026-03-01', '2026-04-03', '2026-04-04', '2026-04-05', '2026-04-06', '2026-05-01', '2026-05-02', '2026-05-03', '2026-06-19', '2026-06-20', '2026-06-21', '2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-24', '2026-10-25', '2026-10-26', '2026-12-25', '2026-12-26', '2026-12-27']
         all_holidays = holidays_2025 + holidays_2026
         return "假日" if (d_str in all_holidays or date.weekday() >= 5) else "平日"
 
@@ -59,11 +49,9 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # --- 人次分類判定 ---
-            if cid.startswith('P') and spec == "成人票":
-                res_att_cat = "親子卡"
-            elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
-                res_att_cat = "校園優惠票"
+            # 人次分類
+            if cid.startswith('P') and spec == "成人票": res_att_cat = "親子卡"
+            elif cid == 'Z00054' and spec == "VIP貴賓券核銷": res_att_cat = "校園優惠票"
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
             elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
             elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
@@ -71,11 +59,9 @@ if check_password():
             elif '平台通路票' in spec: res_att_cat = "平台"
             elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
-            
-            if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收-商品', '商品兌換券', '票券核銷', '活動服務費']): 
-                res_att_cat = "無視"
+            if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收-商品', '商品兌換券', '票券核銷', '活動服務費']): res_att_cat = "無視"
 
-            # 數值計算
+            # 初始計算
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -88,27 +74,17 @@ if check_password():
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
 
-            # --- 營收分類判定 ---
-            if spec in ['商品兌換券', '票券核銷']:
-                res_rev = "無視"
-            elif any(x in spec for x in ['門票分潤', '線上票券']):
-                res_rev = "平台收入"
-            elif spec == '團購兌換券':
-                res_rev = "預售票收入"
-            elif spec == "券差額" or "活動服務費" in spec:
-                res_rev = "票務收入"
-            elif spec == "券類溢收-商品":
-                res_rev = "周邊商品"
-            elif '巨人' in spec:
-                res_rev = "巨人周邊商品"
-            elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']:
-                res_rev = "妖怪周邊商品"
-            elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品", "電競館"]):
-                res_rev = "票務收入"
-            elif res_att_cat == "電競館":
-                res_rev = "電競館收入"
-            else:
-                res_rev = "周邊商品"
+            # 營收分類
+            if spec in ['商品兌換券', '票券核銷']: res_rev = "無視"
+            elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台收入"
+            elif spec == '團購兌換券': res_rev = "預售票收入"
+            elif spec == "券差額" or "活動服務費" in spec: res_rev = "票務收入"
+            elif spec == "券類溢收-商品": res_rev = "周邊商品"
+            elif '巨人' in spec: res_rev = "巨人周邊商品"
+            elif spec in ['妖怪森林公仔', '妖怪森林公仔-煞', '妖怪森林外傳', '妖怪森林盲盒']: res_rev = "妖怪周邊商品"
+            elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品", "電競館"]): res_rev = "票務收入"
+            elif res_att_cat == "電競館": res_rev = "電競館收入"
+            else: res_rev = "周邊商品"
 
             return pd.Series([res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val, rev, pname])
 
@@ -123,20 +99,25 @@ if check_password():
         df_raw = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
         processed = process_data(df_raw)
         
-        # --- [優化] 影片類別動態貼標功能 ---
-        st.sidebar.header("🎬 影片類別自定義標籤")
-        unique_films = [f for f in processed['清單節目名稱'].unique() if f != "" and f != "nan"]
+        # --- [優化 1] 影片類別批次輸入表單 ---
+        st.sidebar.header("🎬 影片類別定義")
+        unique_films = sorted([f for f in processed['清單節目名稱'].unique() if f != "" and f != "nan"])
         
-        # 建立一個 dictionary 儲存使用者輸入的標籤
         film_tag_map = {}
-        with st.sidebar.expander("展開輸入影片類別 (例如：飛越系列雙片)"):
-            st.write("針對偵測到的節目組合輸入類別名稱：")
-            for film in sorted(unique_films):
-                tag = st.text_input(f"組合: {film}", key=f"tag_{film}")
-                film_tag_map[film] = tag if tag else "未分類影片"
+        # 使用 st.sidebar.form 確保填寫過程中不重跑
+        with st.sidebar.form("film_labeling_form"):
+            st.write("請輸入影片對應標籤：")
+            st.caption("💡 標籤填寫「無視」將自動將該片人次歸零。")
+            for film in unique_films:
+                film_tag_map[film] = st.text_input(f"{film}", value="未分類影片", key=f"inp_{film}")
+            
+            submit_labels = st.form_submit_button("💾 儲存並更新分析資料")
 
-        # 將標籤對應回 DataFrame
+        # --- [優化 2] 邏輯聯動：無視影片則人次倍率歸零 ---
         processed['節目類別標籤'] = processed['清單節目名稱'].map(film_tag_map)
+        
+        # 如果標籤是「無視」，強行將人次數據歸零
+        processed.loc[processed['節目類別標籤'] == '無視', ['計算人次', '觀看總數']] = 0
         
         # 篩選器
         st.sidebar.header("📅 數據篩選")
@@ -171,28 +152,20 @@ if check_password():
                 '人次分類': '合計(不含無視、VIP)', 
                 '計算人次': f_df_filtered['計算人次'].sum(), 
                 '觀看總數': f_df_filtered['觀看總數'].sum(), 
-                '電競人次': f_df['電競人次'].sum()
+                '電競人次': f_df_filtered['電競人次'].sum()
             }])]).reset_index(drop=True)
             st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}).apply(apply_style, df_len=len(att_final), axis=1))
 
-        # --- [優化] 節目名稱類別統計表 ---
+        # 影片組合類別統計
         st.divider()
-        st.subheader("🎬 影片組合與類別人次統計")
-        
-        # 只針對有節目的資料進行統計，並排除無視/VIP
+        st.subheader("🎬 影片組合與類別人次統計 (已排除無視/VIP)")
         film_stats = f_df_filtered[f_df_filtered['清單節目名稱'] != ""].groupby(['節目類別標籤', '清單節目名稱']).agg({
             '計算人次': 'sum',
             '觀看總數': 'sum'
         }).reset_index()
         
-        # 計算類別小計
-        film_cat_summary = film_stats.groupby('節目類別標籤').agg({
-            '計算人次': 'sum',
-            '觀看總數': 'sum'
-        }).reset_index()
+        film_cat_summary = film_stats.groupby('節目類別標籤').agg({'計算人次': 'sum', '觀看總數': 'sum'}).reset_index()
         film_cat_summary['清單節目名稱'] = "--- 類別小計 ---"
-        
-        # 合併明細與小計並排序
         combined_film_table = pd.concat([film_stats, film_cat_summary]).sort_values(['節目類別標籤', '清單節目名稱'], ascending=[True, False])
         
         st.dataframe(combined_film_table, use_container_width=True)
