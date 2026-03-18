@@ -19,17 +19,15 @@ def check_password():
     else:
         return True
 
-st.set_page_config(page_title="i-Ride 營收數據分析", layout="wide")
+st.set_page_config(page_title="i-Ride 營收數據分析系統", layout="wide")
 
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
-    # 1. 假期定義 (根據 DGPA 最新 2025-2026 辦公日曆表)
+    # 1. 假期定義 (2025-2026 最新版)
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
-        
-        # 國定假日清單
         holidays_2025 = [
             '2025-01-01', '2025-01-25', '2025-01-26', '2025-01-27', '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-01', '2025-02-02', 
             '2025-02-28', '2025-03-01', '2025-03-02', '2025-04-03', '2025-04-04', '2025-04-05', '2025-04-06', '2025-05-01', '2025-05-30', '2025-05-31', 
@@ -61,7 +59,7 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # [A] 人次分類邏輯
+            # --- 人次分類判定 ---
             if cid.startswith('P') and spec == "成人票":
                 res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷":
@@ -77,7 +75,7 @@ if check_password():
             if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收-商品', '商品兌換券', '票券核銷', '活動服務費']): 
                 res_att_cat = "無視"
 
-            # 數值邏輯
+            # 數值計算
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -90,7 +88,7 @@ if check_password():
                 if res_att_cat != "電競館":
                     res_att_val, res_watch_val = 0, 0
 
-            # [B] 營收分類邏輯
+            # --- 營收分類判定 ---
             if spec in ['商品兌換券', '票券核銷']:
                 res_rev = "無視"
             elif any(x in spec for x in ['門票分潤', '線上票券']):
@@ -118,27 +116,42 @@ if check_password():
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
+    # --- 介面呈現 ---
     uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
 
     if uploaded_file:
-        df = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
-        processed = process_data(df)
+        df_raw = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str}) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
+        processed = process_data(df_raw)
         
+        # --- [優化] 影片類別動態貼標功能 ---
+        st.sidebar.header("🎬 影片類別自定義標籤")
+        unique_films = [f for f in processed['清單節目名稱'].unique() if f != "" and f != "nan"]
+        
+        # 建立一個 dictionary 儲存使用者輸入的標籤
+        film_tag_map = {}
+        with st.sidebar.expander("展開輸入影片類別 (例如：飛越系列雙片)"):
+            st.write("針對偵測到的節目組合輸入類別名稱：")
+            for film in sorted(unique_films):
+                tag = st.text_input(f"組合: {film}", key=f"tag_{film}")
+                film_tag_map[film] = tag if tag else "未分類影片"
+
+        # 將標籤對應回 DataFrame
+        processed['節目類別標籤'] = processed['清單節目名稱'].map(film_tag_map)
+        
+        # 篩選器
         st.sidebar.header("📅 數據篩選")
         all_months = sorted(processed['月份'].unique())
         sel_months = st.sidebar.multiselect("選擇月份", all_months, default=all_months)
         sel_holiday = st.sidebar.multiselect("日期類型", ["平日", "假日"], default=["平日", "假日"])
         
         f_df = processed[(processed['月份'].isin(sel_months)) & (processed['假期'].isin(sel_holiday))].copy()
-
-        # --- [修正點] 定義計算用的 Filtered DataFrame，排除無視與 VIP ---
         f_df_filtered = f_df[~f_df['人次分類'].isin(['無視', 'VIP'])]
 
         st.header(f"📊 營收統計分析")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("總計營收", f"{f_df['統計用營收'].sum():,.0f}")
-        c2.metric("i-Ride 人次", f"{f_df_filtered['計算人次'].sum():,.0f}")  # 排除無視與 VIP
-        c3.metric("影片觀看總數", f"{f_df_filtered['觀看總數'].sum():,.0f}") # 排除無視與 VIP
+        c2.metric("i-Ride 人次", f"{f_df_filtered['計算人次'].sum():,.0f}")
+        c3.metric("影片觀看總數", f"{f_df_filtered['觀看總數'].sum():,.0f}")
         c4.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
 
         def apply_style(x, df_len):
@@ -154,16 +167,35 @@ if check_password():
         with t2:
             st.subheader("👥 人次分類合計")
             att_table = f_df.groupby('人次分類')[['計算人次', '觀看總數', '電競人次']].sum().reset_index()
-            
-            # --- [修正點] 合計行僅加總過濾後的數據 ---
             att_final = pd.concat([att_table, pd.DataFrame([{
                 '人次分類': '合計(不含無視、VIP)', 
                 '計算人次': f_df_filtered['計算人次'].sum(), 
                 '觀看總數': f_df_filtered['觀看總數'].sum(), 
-                '電競人次': f_df_filtered['電競人次'].sum()
+                '電競人次': f_df['電競人次'].sum()
             }])]).reset_index(drop=True)
-            
             st.table(att_final.style.format({'計算人次': '{:,.0f}', '觀看總數': '{:,.0f}', '電競人次': '{:,.0f}'}).apply(apply_style, df_len=len(att_final), axis=1))
+
+        # --- [優化] 節目名稱類別統計表 ---
+        st.divider()
+        st.subheader("🎬 影片組合與類別人次統計")
+        
+        # 只針對有節目的資料進行統計，並排除無視/VIP
+        film_stats = f_df_filtered[f_df_filtered['清單節目名稱'] != ""].groupby(['節目類別標籤', '清單節目名稱']).agg({
+            '計算人次': 'sum',
+            '觀看總數': 'sum'
+        }).reset_index()
+        
+        # 計算類別小計
+        film_cat_summary = film_stats.groupby('節目類別標籤').agg({
+            '計算人次': 'sum',
+            '觀看總數': 'sum'
+        }).reset_index()
+        film_cat_summary['清單節目名稱'] = "--- 類別小計 ---"
+        
+        # 合併明細與小計並排序
+        combined_film_table = pd.concat([film_stats, film_cat_summary]).sort_values(['節目類別標籤', '清單節目名稱'], ascending=[True, False])
+        
+        st.dataframe(combined_film_table, use_container_width=True)
 
         st.divider()
         st.subheader("📄 數據明細")
