@@ -23,21 +23,18 @@ st.set_page_config(page_title="i-Ride 營運智慧分析系統", layout="wide")
 HIGHLIGHT_COLOR = "rgba(0, 123, 255, 0.4)" 
 
 if check_password():
-    # 1. 假期定義 (2025-2026)
+    # 1. 假期定義
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
-        holidays = [
-            '2025-01-01', '2025-01-28', '2025-01-29', '2025-01-30', '2025-02-28', 
-            '2025-04-04', '2025-04-05', '2025-05-01', '2025-05-31', '2025-10-06', '2025-10-10'
-        ]
+        holidays = ['2025-01-01', '2025-01-28', '2025-01-29', '2025-01-30', '2025-02-28', '2025-04-04', '2025-04-05', '2025-05-01', '2025-05-31', '2025-10-06', '2025-10-10']
         return "假日" if (d_str in holidays or date.weekday() >= 5) else "平日"
 
     def is_national_holiday(date):
         d_str = date.strftime('%Y-%m-%d')
         return d_str in ['2025-01-01','2025-01-28','2025-01-29','2025-01-30','2025-02-28','2025-04-04','2025-04-05','2025-05-01','2025-05-31','2025-10-06','2025-10-10']
 
-    # 2. 核心數據處理 (嚴格邏輯：沒節目不計人次，但 strip() 解決空格導致的 142 差額)
+    # 2. 核心處理函數 (對齊 34,516 邏輯)
     def process_data(df):
         df['交易日期'] = pd.to_datetime(df['交易日期'], errors='coerce')
         df = df.dropna(subset=['交易日期']).copy()
@@ -46,8 +43,7 @@ if check_password():
         df['時段小時'] = pd.to_datetime(df['場次時間'], format='%H:%M', errors='coerce').dt.hour
 
         def classify(row):
-            # [關鍵] strip() 清除隱形空格，確保帶空格的節目能被認出來
-            pname = str(row.get('節目名稱', '')).strip()
+            pname = str(row.get('節目名稱', '')).strip() # strip() 解決隱形空格問題
             spec = str(row.get('品名規格', '')).strip()
             cid = str(row.get('會員卡號', row.get('客戶編號', ''))).strip().upper()
             qty = pd.to_numeric(row.get('交易數量', 0), errors='coerce') or 0
@@ -55,7 +51,7 @@ if check_password():
             
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # --- A. 人次分類 (對齊穩定版) ---
+            # --- A. 人次分類 ---
             if cid.startswith('P') and spec == "成人票": res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷": res_att_cat = "校園優惠票"
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
@@ -69,7 +65,7 @@ if check_password():
             if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收', '商品兌換券', '票券核銷', '活動服務費']): 
                 res_att_cat = "無視"
 
-            # --- B. 數值邏輯 (沒節目 = 0) ---
+            # --- B. 數值邏輯 (嚴格：沒節目不計人次) ---
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -93,22 +89,22 @@ if check_password():
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
         return df
 
-    # 3. 介面
+    # 3. UI 介面
     uploaded_file = st.file_uploader("1. 上傳原始檔", type=['csv', 'xlsx'])
     if uploaded_file:
         df_raw = pd.read_csv(uploaded_file, dtype=str) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype=str)
         processed = process_data(df_raw)
         
-        # 側邊欄
-        st.sidebar.header("⚙️ 篩選與標籤")
+        # 側邊欄：篩選與標籤
+        st.sidebar.header("⚙️ 篩選與設定")
         sel_site = st.sidebar.selectbox("據點", ["台北店", "高雄店"])
         off_days = st.sidebar.date_input("高雄公休日", value=[])
         sel_months = st.sidebar.multiselect("月份", sorted(processed['月份'].unique()), default=processed['月份'].unique())
         sel_holiday = st.sidebar.multiselect("日期類型", ["平日", "假日"], default=["平日", "假日"])
         
-        # 影片標籤
+        # 影片類別標籤
         unique_films = sorted([f for f in processed['清單節目名稱'].unique() if f != "" and f != "nan"])
-        with st.sidebar.form("tag_form"):
+        with st.sidebar.form("tagging"):
             film_map = {f: st.text_input(f, value="未分類") for f in unique_films}
             st.form_submit_button("🔘 更新類別")
         processed['標籤'] = processed['清單節目名稱'].map(film_map)
@@ -118,40 +114,48 @@ if check_password():
         f_df_filtered = f_df[~f_df['人次分類'].isin(['無視', 'VIP'])]
 
         # 指標卡
-        st.header(f"📊 {sel_site} 數據看板")
+        st.header(f"📊 {sel_site} 分析報表")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("總計營收", f"{f_df['統計用營税'].sum() if '統計用營税' in f_df else f_df['統計用營收'].sum():,.0f}")
+        c1.metric("總計營收", f"{f_df['統計用營收'].sum():,.0f}")
         c2.metric("i-Ride 人次 (去VIP)", f"{f_df_filtered['計算人次'].sum():,.0f}")
         c3.metric("電競館人次", f"{f_df['電競人次'].sum():,.0f}")
         
-        # 下載按鈕
-        csv = f_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 下載本次分析明細 (CSV)", csv, "analysis_report.csv", "text/csv")
+        # 下載功能
+        csv_data = f_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("💾 下載分析明細 (CSV)", csv_data, "report.csv", "text/csv")
 
+        # 表格樣式
         def style_total(x, t_len):
             is_tot = (x.name == t_len-1) or any("合計" in str(v) for v in x.values)
             return [f'background-color: {HIGHLIGHT_COLOR}; font-weight: bold' if is_tot else '' for _ in x]
 
         st.divider()
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.subheader("💰 營收分類統計")
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.subheader("💰 營收分類合計")
             rt = f_df.groupby('營收分類')['含稅營收'].sum().reset_index()
             rf = pd.concat([rt, pd.DataFrame([{'營收分類':'合計(不含無視)','含稅營收':f_df['統計用營收'].sum()}])]).reset_index(drop=True)
+            # 修正點：只對數字欄位進行格式化
             st.table(rf.style.format({'含稅營收':'{:,.0f}'}).apply(style_total, t_len=len(rf), axis=1))
-        with col_b:
-            st.subheader("👥 人次分類統計")
-            at = f_df.groupby('人次分類')[['計算人次','觀看總數','電競人次']].sum().reset_index()
-            af = pd.concat([at, pd.DataFrame([{'人次分類':'合計(去無視/VIP)','計算人次':f_df_filtered['計算人次'].sum(),'觀看總數':f_df_filtered['觀看總數'].sum(),'電競人次':f_df['電競人次'].sum()}])]).reset_index(drop=True)
-            st.table(af.style.format('{:,.0f}').apply(style_total, t_len=len(af), axis=1))
 
-        # 影片類別統計
+        with col_r:
+            st.subheader("👥 人次分類合計")
+            at = f_df.groupby('人次分類')[['計算人次', '觀看總數', '電競人次']].sum().reset_index()
+            af = pd.concat([at, pd.DataFrame([{
+                '人次分類': '合計(去無視/VIP)', 
+                '計算人次': f_df_filtered['計算人次'].sum(), 
+                '觀看總數': f_df_filtered['觀看總數'].sum(), 
+                '電競人次': f_df['電競人次'].sum()
+            }])]).reset_index(drop=True)
+            # 修正點：subset 指定數字欄位，避免 ValueError
+            st.table(af.style.format({'計算人次':'{:,.0f}', '觀看總數':'{:,.0f}', '電競人次':'{:,.0f}'}).apply(style_total, t_len=len(af), axis=1))
+
         st.divider()
-        st.subheader("🎬 影片類別細分 (排除無視/VIP)")
+        st.subheader("🎬 影片類別細項統計 (排除無視/VIP)")
         fs = f_df_filtered[f_df_filtered['清單節目名稱'] != ""].groupby(['標籤','清單節目名稱']).agg({'計算人次':'sum'}).reset_index()
-        st.table(fs.style.format('{:,.0f}').apply(style_total, t_len=len(fs), axis=1))
+        st.table(fs.style.format({'計算人次':'{:,.0f}'}).apply(style_total, t_len=len(fs), axis=1))
 
-        # 稼動率 (台北假日 21:00 併場邏輯)
+        # 稼動率表格
         st.divider()
         st.subheader("⏰ 時段稼動率分析")
         def calc_cap(df_in, site, off_dt):
