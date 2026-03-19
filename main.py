@@ -28,7 +28,6 @@ if check_password():
     def get_holiday_type(date):
         if pd.isna(date): return "未知"
         d_str = date.strftime('%Y-%m-%d')
-        # 2025-2026 國定假日清單 (簡略版，建議依實際需求擴充)
         holidays = ['2025-01-01', '2025-01-25', '2025-01-28', '2025-01-29', '2025-01-30', '2025-02-28', '2025-04-04', '2025-04-05', '2025-05-01', '2025-05-31', '2025-10-06', '2025-10-10']
         return "假日" if (d_str in holidays or date.weekday() >= 5) else "平日"
 
@@ -43,7 +42,6 @@ if check_password():
         df = df.dropna(subset=['交易日期']).copy()
         df['月份'] = df['交易日期'].dt.strftime('%Y/%m月')
         df['假期'] = df['交易日期'].apply(get_holiday_type)
-        # 時段處理
         df['時段小時'] = pd.to_datetime(df['場次時間'], format='%H:%M', errors='coerce').dt.hour
         
         def classify(row):
@@ -54,7 +52,6 @@ if check_password():
             rev = pd.to_numeric(row.get('原幣含稅金額', 0), errors='coerce') or 0
             res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
 
-            # 人次判定 (包含 VIP 以利稼動率計算)
             if cid.startswith('P') and spec == "成人票": res_att_cat = "親子卡"
             elif cid == 'Z00054' and spec == "VIP貴賓券核銷": res_att_cat = "校園優惠票"
             elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東"
@@ -66,7 +63,6 @@ if check_password():
             elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
             if any(x in spec for x in ['免費票', '員工票', '券差額', '券類溢收-商品', '商品兌換券', '票券核銷', '活動服務費']): res_att_cat = "無視"
 
-            # 觀看總數與計算人次
             if pname != "" and pname != "nan":
                 res_watch_val = qty
                 n_films = 2 if ('+' in pname or '＋' in pname) else 1
@@ -77,7 +73,6 @@ if check_password():
                     res_esports_val = qty
                 if res_att_cat != "電競館": res_att_val, res_watch_val = 0, 0
 
-            # 營收判定
             if spec in ['商品兌換券', '票券核銷']: res_rev = "無視"
             elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台收入"
             elif (pname != "" and pname != "nan") or ("票" in spec) or ("券" in spec) or (res_att_cat not in ["無視", "周邊商品", "電競館"]): res_rev = "票務收入"
@@ -91,7 +86,32 @@ if check_password():
         return df
 
     # --- 3. 介面呈現 ---
-    uploaded_file = st.file_uploader("1. 上傳原始檔 (CSV 或 Excel)", type=['csv', 'xlsx'])
+    uploaded_file = st.file_uploader("1. 上傳原始檔", type=['csv', 'xlsx'])
 
     if uploaded_file:
-        df_raw = pd.read_csv(uploaded_file,
+        # 修正後的讀取邏輯
+        if uploaded_file.name.endswith('.csv'):
+            df_raw = pd.read_csv(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
+        else:
+            df_raw = pd.read_excel(uploaded_file, dtype={'會員卡號': str, '客戶編號': str})
+            
+        processed = process_data(df_raw)
+        
+        # 側邊欄 A
+        st.sidebar.header("🏢 營運參數設定")
+        with st.sidebar.form("site_config_form"):
+            sel_site = st.selectbox("選擇據點", ["台北店", "高雄店"])
+            off_days_list = st.date_input("高雄公休日選擇 (僅高雄有效)", value=[])
+            st.form_submit_button("🔘 更新營運設定")
+
+        # 側邊欄 B
+        st.sidebar.header("🎬 影片類別定義")
+        unique_films = sorted([f for f in processed['清單節目名稱'].unique() if f != "" and f != "nan"])
+        with st.sidebar.form("film_labeling_form"):
+            film_tag_map = {}
+            for film in unique_films:
+                film_tag_map[film] = st.text_input(f"{film}", value="未分類影片", key=f"inp_{film}")
+            st.form_submit_button("🔘 更新影片標籤")
+
+        processed['節目類別標籤'] = processed['清單節目名稱'].map(film_tag_map)
+        processed.loc[processed['節目類別標籤'] == '無視', ['計算人
