@@ -192,3 +192,16 @@ if check_password():
             util_pivot = util_df.pivot(index='時段小時', columns='假期', values='稼動率').fillna("-")
             util_pivot.index = [f"{int(h):02d}:00" for h in util_pivot.index]
             st.table(util_pivot)
+# --- 額外新增：在顯示指標卡後，增加一個偵測區 --- (約 Line 145)
+with st.expander("🔍 數據對位偵錯 (142人次去向)"):
+    # 找出：非無視、非VIP，但計算人次為 0 的異常筆數
+    lost_data = f_df[(f_df['計算人次'] == 0) & 
+                     (~f_df['人次分類'].isin(['無視', 'VIP', '電競館'])) & 
+                     (pd.to_numeric(f_df['交易數量'], errors='coerce') > 0)]
+    st.write(f"目前有 {len(lost_data)} 筆有效票種，但因『節目名稱空白』導致人次被算為 0")
+    st.dataframe(lost_data[['交易日期', '品名規格', '節目名稱', '交易數量']])
+
+# --- 額外新增：稼動率計算邏輯 --- (Line 175 起)
+st.divider()
+st.subheader("⏰ 時段稼動率分析")
+# ... (此處接續前一版的 calc_capacity_total 邏輯)
