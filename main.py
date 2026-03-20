@@ -47,9 +47,14 @@ if check_password():
 
     if uploaded_file:
         if "raw_df" not in st.session_state:
-            st.session_state.raw_df = pd.read_csv(uploaded_file, dtype=str) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype=str)
+            raw = pd.read_csv(uploaded_file, dtype=str) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file, dtype=str)
+            # 【關鍵修復】: 強制去除標題前後的空格/換行，防止 KeyError
+            raw.columns = raw.columns.str.strip()
+            st.session_state.raw_df = raw
 
         df = st.session_state.raw_df.copy()
+        
+        # 安全轉換日期
         df['交易日期'] = pd.to_datetime(df['交易日期'], errors='coerce')
         df = df.dropna(subset=['交易日期']).copy()
         df['月份'] = df['交易日期'].dt.strftime('%Y/%m月')
@@ -75,7 +80,7 @@ if check_password():
             cid = str(row.get('會員卡號', row.get('客戶編號', ''))).strip().upper()
             qty = pd.to_numeric(row.get('交易數量', 0), errors='coerce') or 0
             rev = pd.to_numeric(row.get('原幣含稅金額', 0), errors='coerce') or 0
-            res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "無視", 0, 0, 0
+            res_rev, res_att_cat, res_att_val, res_esports_val, res_watch_val = "周邊商品", "待確認票種", 0, 0, 0
             is_anomaly = False
 
             has_video = (pname != "" and pname != "nan")
@@ -84,24 +89,28 @@ if check_password():
             if has_video:
                 res_watch_val = qty
                 res_att_val = (2 if ('+' in pname or '＋' in pname) else 1) * qty
+                # 分類優先序調整
                 if cid.startswith('P') and "成人票" in spec: res_att_cat = "親子卡"
-                elif cid == 'Z00054' and spec == "VIP貴賓券核銷": res_att_cat = "校園票"
+                elif cid == 'Z00054' or "VIP貴賓券核銷" in spec: res_att_cat = "校園票"
                 elif any(x in spec for x in ['股東券', '股東票']): res_att_cat = "股東票"
-                elif '貴賓體驗通行證核銷' in spec: res_att_cat = "VVIP"
-                elif 'VIP貴賓券核銷' in spec: res_att_cat = "VIP"
-                elif any(x in spec for x in ['團購兌換券展延', '團購兌換券核銷']): res_att_cat = "團購券"
+                elif '貴賓體驗通行證' in spec: res_att_cat = "VVIP"
+                elif 'VIP貴賓券' in spec: res_att_cat = "VIP"
+                elif '團購兌換券' in spec: res_att_cat = "團購券"
                 elif '平台通路票' in spec: res_att_cat = "平台"
-                elif any(x in spec for x in ['企業優惠票', '團體優惠票']): res_att_cat = "團體"
-                elif any(x in spec for x in ['市民票', '愛心票', '學生票', '優惠套票', '成人票']): res_att_cat = "散客"
+                elif any(x in spec for x in ['企業優惠', '團體優惠']): res_att_cat = "團體"
+                elif any(x in spec for x in ['市民', '愛心', '學生', '套票', '成人票']): res_att_cat = "散客"
                 
                 if any(x in spec for x in ['免費票', '員工票', '券差額', '商品兌換券', '票券核銷']): res_att_cat = "無視"
-                if not has_ticket_word and res_att_cat != "無視": is_anomaly = True
+                
+                # 只有完全沒對到分類，才算衝突
+                if res_att_cat == "待確認票種": is_anomaly = True
             else:
                 if any(k in spec for k in ['VR','體感','賽車','僵屍','LED']): 
                     res_att_cat, res_esports_val, res_att_val = "電競館", qty, qty
                 elif has_ticket_word: 
                     is_anomaly, res_att_cat = True, "待確認票種"
 
+            # 營收判定
             matched_camp = next((k for k in campaign_keys if k in spec), None)
             if spec in ['商品兌換券', '票券核銷']: res_rev = "無視"
             elif any(x in spec for x in ['門票分潤', '線上票券']): res_rev = "平台"
@@ -119,14 +128,17 @@ if check_password():
         anomaly_specs = sorted(df[df['是否衝突'] == True]['原始規格'].unique())
         if len(anomaly_specs) > 0 and not st.session_state.anomaly_finished:
             with st.form("anomaly_fix_form"):
-                st.error(f"🚨 偵測到 {len(anomaly_specs)} 項邏輯衝突品名：")
+                st.error(f"🚨 偵測到 {len(anomaly_specs)} 項「無法自動分類」的品名：")
                 temp_fixes = {}
                 for spec in anomaly_specs:
                     c1, c2, c3, c4 = st.columns([2, 1.2, 1.2, 1.2])
                     with c1: st.write(f"**{spec}**")
-                    with c2: temp_fixes[f"{spec}_att"] = st.selectbox("人次類別", ["VIP", "VVIP", "平台", "股東票", "校園票", "散客", "無視", "團購券", "團體", "親子卡"], key=f"a_att_{spec}")
-                    with c3: temp_fixes[f"{spec}_rev"] = st.selectbox("營收類別", ["票務", "周邊商品", "平台", "無視", "預售票", "檔期商品"], key=f"a_rev_{spec}")
-                    with c4: temp_fixes[f"{spec}_key"] = st.text_input("檔期名", key=f"a_key_{spec}")
+                    with c2: temp_fixes[f"{spec}_att"] = st.selectbox("人次類別", ["散客", "平台", "VIP", "VVIP", "校園票", "股東票", "團體", "親子卡", "團購券", "無視"], key=f"a_att_{spec}")
+                    with c3: temp_fixes[f"{spec}_rev"] = st.selectbox("營收類別", ["票務", "周邊商品", "平台", "預售票", "無視", "檔期商品"], key=f"a_rev_{spec}")
+                    with c4: temp_fixes[f"{spec}_key"] = st.text_input("檔期名", placeholder="如：巨人", key=f"a_key_{spec}")
+                
+                st.info("💡 為什麼需要手動選？：這代表該品名規格在程式內沒有預設規則（例如新活動票種），請手動指派後按下確認。")
+                
                 if st.form_submit_button("✅ 確認分類並產出報表"):
                     for spec in anomaly_specs:
                         rev_val = f"{temp_fixes[f'{spec}_key']}周邊商品" if temp_fixes[f"{spec}_rev"] == "檔期商品" else temp_fixes[f"{spec}_rev"]
@@ -134,14 +146,14 @@ if check_password():
                     st.session_state.anomaly_finished = True
                     st.rerun()
 
-        # --- 數據套用與二次清洗 ---
+        # --- 數據套用 ---
         if st.session_state.anomaly_finished:
             for spec, mapping in st.session_state.confirmed_mapping.items():
                 mask = df['原始規格'] == spec
                 df.loc[mask, '人次分類'] = mapping['att']
                 df.loc[mask, '營收分類'] = mapping['rev']
 
-        # 強制修正：凡是分類為「無視」的，人次數據必須歸零
+        # 最終數據清洗
         df.loc[df['人次分類'] == "無視", ['計算人次', '觀看總數']] = 0
         df['影片類別'] = df['清單節目名稱'].map(tag_map)
         df['統計用營收'] = df.apply(lambda x: 0 if x['營收分類'] == '無視' else x['含稅營收'], axis=1)
